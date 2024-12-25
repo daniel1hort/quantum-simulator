@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Complex = packed struct {
+pub const Complex = struct {
     a: f64,
     b: f64,
 

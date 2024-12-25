@@ -126,6 +126,38 @@ pub fn Vector(comptime T: type) type {
             return buffer;
         }
 
+        pub fn tensor(self: Self, other: Self, buffer: Self) !Self {
+            const len = self.values.len * other.values.len;
+            if (len != buffer.values.len)
+                return error.LengthsDontMatch;
+
+            const n = other.values.len;
+            switch (@typeInfo(T)) {
+                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                    for (self.values, 0..) |a, index_a| {
+                        for (other.values, 0..) |b, index_b| {
+                            const index = n * index_a + index_b;
+                            buffer.values[index] = a * b;
+                        }
+                    }
+                },
+                .Struct => {
+                    if (!std.meta.hasMethod(T, "multiply"))
+                        panic("no method multiply", .{});
+
+                    for (self.values, 0..) |a, index_a| {
+                        for (other.values, 0..) |b, index_b| {
+                            const index = n * index_a + index_b;
+                            buffer.values[index] = a.multiply(b);
+                        }
+                    }
+                },
+                else => unreachable,
+            }
+
+            return buffer;
+        }
+
         pub fn conjugate(self: Self, buffer: Self) !Self {
             if (self.values.len != buffer.values.len)
                 return error.LengthsDontMatch;
@@ -158,6 +190,7 @@ pub fn Vector(comptime T: type) type {
             for (value.values) |a| {
                 try writer.print("{any} ", .{a});
             }
+            try writer.print("\n", .{});
         }
     };
 }
