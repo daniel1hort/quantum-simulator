@@ -42,6 +42,32 @@ pub fn Matrix(comptime T: type) type {
             return buffer;
         }
 
+        pub fn add(self: Self, other: Self, buffer: Self) !Self {
+            const size_0 = self.n_rows != other.n_rows or self.n_cols != other.n_cols;
+            const size_1 = self.n_rows != buffer.n_rows or self.n_cols != buffer.n_cols;
+            if (size_0 or size_1)
+                return error.LengthsDontMatch;
+
+            switch (@typeInfo(T)) {
+                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                    for (self.values, other.values, 0..) |a, b, index| {
+                        buffer.values[index] = a + b;
+                    }
+                },
+                .Struct => {
+                    if (!std.meta.hasMethod(T, "add"))
+                        panic("no method add", .{});
+
+                    for (self.values, other.values, 0..) |a, b, index| {
+                        buffer.values[index] = a.add(b);
+                    }
+                },
+                else => unreachable,
+            }
+
+            return buffer;
+        }
+
         pub fn vectorMultiply(self: Self, other: Vector(T), buffer: Vector(T)) !Vector(T) {
             if (self.n_cols != other.values.len or other.values.len != buffer.values.len)
                 return error.LengthsDontMatch;

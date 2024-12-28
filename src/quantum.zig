@@ -8,6 +8,50 @@ pub const Gate = struct {
     matrix: *const Matrix,
     qubits: []usize,
     time: usize = 0,
+
+    pub fn controlled(allocator: Allocator, matrix: Matrix) !Matrix {
+        const size: usize = @intFromFloat(@log2(@as(f64, @floatFromInt(matrix.n_rows))));
+
+        const dimension = std.math.pow(usize, 2, size + 1);
+        const buffer_len = dimension * dimension;
+        const _buffer_0 = try allocator.alloc(Complex, buffer_len);
+        defer allocator.free(_buffer_0);
+        const _buffer_1 = try allocator.alloc(Complex, buffer_len);
+        defer allocator.free(_buffer_1);
+        const _current = try allocator.alloc(Complex, buffer_len);
+
+        var buffer_0: Matrix = undefined;
+        var buffer_1: Matrix = undefined;
+        var current = std.mem.zeroes(Matrix);
+        current.values = _current;
+        current.copyFrom(rho_0);
+
+        for (0..size) |_| {
+            const next = &identity;
+            const n_rows = current.n_rows * next.n_rows;
+            const n_cols = current.n_cols * next.n_cols;
+            const tensor_len = n_rows * n_cols;
+
+            buffer_0.values = _buffer_0[0..tensor_len];
+            buffer_0.n_rows = n_rows;
+            buffer_0.n_cols = n_cols;
+
+            _ = try current.tensor(next.*, buffer_0);
+            current.copyFrom(buffer_0);
+        }
+
+        current.copyFrom(rho_1);
+        buffer_1.values = _buffer_1;
+        buffer_1.n_rows = dimension;
+        buffer_1.n_cols = dimension;
+        _ = try current.tensor(matrix, buffer_1);
+
+        current.n_rows = dimension;
+        current.n_cols = dimension;
+        _ = try buffer_0.add(buffer_1, current);
+
+        return current;
+    }
 };
 
 pub const QuantumCircuit = struct {
@@ -15,7 +59,7 @@ pub const QuantumCircuit = struct {
     q_reg: Vector,
     gates: std.ArrayList(Gate),
     times: []usize,
-    permutations: []usize,
+    permutation: []usize,
 
     pub fn init(allocator: Allocator, q_num: usize) !QuantumCircuit {
         const reg_size = std.math.pow(usize, 2, q_num);
@@ -26,9 +70,9 @@ pub const QuantumCircuit = struct {
 
         const times = try allocator.alloc(usize, q_num);
         @memset(times, 0);
-        const permutations = try allocator.alloc(usize, q_num);
+        const permutation = try allocator.alloc(usize, q_num);
         for (0..q_num) |index| {
-            permutations[index] = index;
+            permutation[index] = index;
         }
 
         const gates = std.ArrayList(Gate).init(allocator);
@@ -37,14 +81,14 @@ pub const QuantumCircuit = struct {
             .q_reg = q_reg,
             .gates = gates,
             .times = times,
-            .permutations = permutations,
+            .permutation = permutation,
         };
     }
 
     pub fn deinit(self: QuantumCircuit) void {
         self.allocator.free(self.q_reg.values);
         self.allocator.free(self.times);
-        self.allocator.free(self.permutations);
+        self.allocator.free(self.permutation);
         for (self.gates.items) |*gate| {
             self.allocator.free(gate.qubits);
         }
@@ -52,53 +96,59 @@ pub const QuantumCircuit = struct {
     }
 
     pub fn x(self: *QuantumCircuit, qubit: usize) !void {
-        const qubits = try self.allocator.alloc(usize, 1);
-        qubits[0] = qubit;
-        self.times[qubit] += 1;
-        const gate = Gate{
-            .matrix = &standard_matrices[1],
-            .qubits = qubits,
-            .time = self.times[qubit],
-        };
-        try self.gates.append(gate);
+        const qubits = [_]usize{qubit};
+        const matrix = &pauli_x;
+        try self.addGate(matrix, &qubits);
     }
 
     pub fn h(self: *QuantumCircuit, qubit: usize) !void {
-        const qubits = try self.allocator.alloc(usize, 1);
-        qubits[0] = qubit;
-        self.times[qubit] += 1;
-        const gate = Gate{
-            .matrix = &standard_matrices[2],
-            .qubits = qubits,
-            .time = self.times[qubit],
-        };
-        try self.gates.append(gate);
+        const qubits = [_]usize{qubit};
+        const matrix = &hadamard;
+        try self.addGate(matrix, &qubits);
     }
 
     pub fn cx(self: *QuantumCircuit, control: usize, target: usize) !void {
-        const qubits = try self.allocator.alloc(usize, 2);
-        qubits[0] = control;
-        qubits[1] = target;
-        const time = @max(self.times[control], self.times[target]) + 1;
-        self.times[control] = time;
-        self.times[target] = time;
+        const qubits = [_]usize{ control, target };
+        const matrix = &controlled_not;
+        try self.addGate(matrix, &qubits);
+    }
+
+    pub fn swap(self: *QuantumCircuit, a: usize, b: usize) !void {
+        const qubits = [_]usize{ a, b };
+        const matrix = &swap_gate;
+        try self.addGate(matrix, &qubits);
+    }
+
+    pub fn addGate(self: *QuantumCircuit, matrix: *const Matrix, qubits: []const usize) !void {
+        const _qubits = try self.allocator.alloc(usize, qubits.len);
+        @memcpy(_qubits, qubits);
+
+        if (qubits.len > 1)
+            try self.addSwapGates(_qubits);
+
+        const time = self.maxTime(_qubits) + 1;
+        for (_qubits) |qubit| {
+            self.times[qubit] = time;
+        }
+
         const gate = Gate{
-            .matrix = &standard_matrices[3],
-            .qubits = qubits,
+            .matrix = matrix,
+            .qubits = _qubits,
             .time = time,
         };
         try self.gates.append(gate);
     }
 
-    pub fn swap(self: *QuantumCircuit, a: usize, b: usize) !void {
+    fn intermediateSwap(self: *QuantumCircuit, a: usize, b: usize) !void {
         const qubits = try self.allocator.alloc(usize, 2);
         qubits[0] = a;
         qubits[1] = b;
+
         const time = @max(self.times[a], self.times[b]) + 1;
         self.times[a] = time;
         self.times[b] = time;
         const gate = Gate{
-            .matrix = &standard_matrices[4],
+            .matrix = &swap_gate,
             .qubits = qubits,
             .time = time,
         };
@@ -111,6 +161,7 @@ pub const QuantumCircuit = struct {
     }
 
     pub fn run(self: *QuantumCircuit) !void {
+        try self.reorderQubits();
         const buffer_len = self.q_reg.values.len;
         const _buffer = try self.allocator.alloc(Complex, buffer_len);
         defer self.allocator.free(_buffer);
@@ -148,7 +199,7 @@ pub const QuantumCircuit = struct {
                     }
                 }
                 break :blk null;
-            } orelse &standard_matrices[0];
+            } orelse &identity;
 
             try matrices.append(matrix);
         }
@@ -179,71 +230,148 @@ pub const QuantumCircuit = struct {
 
         return current;
     }
+
+    fn firstQubitPosition(self: QuantumCircuit, qubits: []usize) usize {
+        const head = qubits[0];
+        const tail = qubits[1..];
+        const head_pos = std.mem.indexOfScalar(
+            usize,
+            self.permutation,
+            head,
+        ).?;
+        const tail_pos = std.mem.indexOfAny(
+            usize,
+            self.permutation,
+            tail,
+        ).?;
+        return @min(head_pos, tail_pos);
+    }
+
+    fn addSwapGates(self: *QuantumCircuit, qubits: []usize) !void {
+        const desired_pos = self.firstQubitPosition(qubits);
+
+        for (qubits, 0..) |qubit, offset| {
+            const start = std.mem.indexOfScalar(
+                usize,
+                self.permutation,
+                qubit,
+            ).?;
+            const end = desired_pos + offset;
+            var pos = start;
+
+            while (pos > end) : (pos -= 1) {
+                try self.intermediateSwap(pos - 1, pos);
+                swapValues(&self.permutation[pos - 1], &self.permutation[pos]);
+            }
+            qubits[offset] = end;
+        }
+    }
+
+    pub fn reorderQubits(self: *QuantumCircuit) !void {
+        const permutation = try self.allocator.alloc(usize, self.permutation.len);
+        defer self.allocator.free(permutation);
+        for (0..permutation.len) |index| {
+            permutation[index] = index;
+        }
+        try self.addSwapGates(permutation);
+    }
+
+    fn maxTime(self: QuantumCircuit, qubits: []usize) usize {
+        var max: usize = 0;
+        for (qubits) |qubit| {
+            max = @max(max, self.times[qubit]);
+        }
+        return max;
+    }
 };
 
-const standard_matrices: [5]Matrix = .{
-    .{
-        .values = @constCast(&U(0, 0, 0)),
-        .n_rows = 2,
-        .n_cols = 2,
-    },
-    .{
-        .values = @constCast(&U(std.math.pi, 0, std.math.pi)),
-        .n_rows = 2,
-        .n_cols = 2,
-    },
-    .{
-        .values = @constCast(&U(std.math.pi * 0.5, 0, std.math.pi)),
-        .n_rows = 2,
-        .n_cols = 2,
-    },
-    .{
-        .values = @constCast(&[16]Complex{
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-        }),
-        .n_rows = 4,
-        .n_cols = 4,
-    },
-    .{
-        .values = @constCast(&[16]Complex{
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 0, .b = 0 },
-            .{ .a = 1, .b = 0 },
-        }),
-        .n_rows = 4,
-        .n_cols = 4,
-    },
+fn swapValues(a: anytype, b: @TypeOf(a)) void {
+    const aux: @TypeOf(a.*) = a.*;
+    a.* = b.*;
+    b.* = aux;
+}
+
+pub const identity = Matrix{
+    .values = @constCast(&U(0, 0, 0)),
+    .n_rows = 2,
+    .n_cols = 2,
+};
+pub const pauli_x = Matrix{
+    .values = @constCast(&U(std.math.pi, 0, std.math.pi)),
+    .n_rows = 2,
+    .n_cols = 2,
+};
+pub const hadamard = Matrix{
+    .values = @constCast(&U(std.math.pi * 0.5, 0, std.math.pi)),
+    .n_rows = 2,
+    .n_cols = 2,
+};
+pub const controlled_not = Matrix{
+    .values = @constCast(&[16]Complex{
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+    }),
+    .n_rows = 4,
+    .n_cols = 4,
+};
+pub const swap_gate = Matrix{
+    .values = @constCast(&[16]Complex{
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+    }),
+    .n_rows = 4,
+    .n_cols = 4,
+};
+pub const rho_0 = Matrix{
+    .values = @constCast(&[4]Complex{
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+    }),
+    .n_rows = 2,
+    .n_cols = 2,
+};
+pub const rho_1 = Matrix{
+    .values = @constCast(&[4]Complex{
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 1, .b = 0 },
+    }),
+    .n_rows = 2,
+    .n_cols = 2,
 };
 
-fn U(theta: f64, phi: f64, lambda: f64) [4]Complex {
+pub fn U(theta: f64, phi: f64, lambda: f64) [4]Complex {
     return .{
         .{
             .a = @cos(theta * 0.5),
