@@ -6,13 +6,17 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var circuit = try QuantumCircuit.init(allocator, 2);
+    var circuit = try QuantumCircuit.init(allocator, 3);
     defer circuit.deinit();
 
     try circuit.x(0);
     circuit.barrier();
     try circuit.h(0);
     try circuit.x(1);
+    try circuit.cx(0, 1);
+    try circuit.swap(1, 2);
+    try circuit.cx(0, 1);
+    try circuit.swap(1, 2);
 
     // for (circuit.gates.items) |gate| {
     //     std.debug.print("at {d}\n{}\n", .{ gate.time, gate.matrix });
@@ -20,5 +24,5 @@ pub fn main() !void {
 
     try circuit.run();
 
-    std.debug.print("{}\n", .{circuit.q_reg});
+    std.debug.print("{|>}\n", .{circuit.q_reg});
 }

@@ -15,6 +15,7 @@ pub const QuantumCircuit = struct {
     q_reg: Vector,
     gates: std.ArrayList(Gate),
     times: []usize,
+    permutations: []usize,
 
     pub fn init(allocator: Allocator, q_num: usize) !QuantumCircuit {
         const reg_size = std.math.pow(usize, 2, q_num);
@@ -25,6 +26,10 @@ pub const QuantumCircuit = struct {
 
         const times = try allocator.alloc(usize, q_num);
         @memset(times, 0);
+        const permutations = try allocator.alloc(usize, q_num);
+        for (0..q_num) |index| {
+            permutations[index] = index;
+        }
 
         const gates = std.ArrayList(Gate).init(allocator);
         return .{
@@ -32,12 +37,14 @@ pub const QuantumCircuit = struct {
             .q_reg = q_reg,
             .gates = gates,
             .times = times,
+            .permutations = permutations,
         };
     }
 
     pub fn deinit(self: QuantumCircuit) void {
         self.allocator.free(self.q_reg.values);
         self.allocator.free(self.times);
+        self.allocator.free(self.permutations);
         for (self.gates.items) |*gate| {
             self.allocator.free(gate.qubits);
         }
@@ -64,6 +71,36 @@ pub const QuantumCircuit = struct {
             .matrix = &standard_matrices[2],
             .qubits = qubits,
             .time = self.times[qubit],
+        };
+        try self.gates.append(gate);
+    }
+
+    pub fn cx(self: *QuantumCircuit, control: usize, target: usize) !void {
+        const qubits = try self.allocator.alloc(usize, 2);
+        qubits[0] = control;
+        qubits[1] = target;
+        const time = @max(self.times[control], self.times[target]) + 1;
+        self.times[control] = time;
+        self.times[target] = time;
+        const gate = Gate{
+            .matrix = &standard_matrices[3],
+            .qubits = qubits,
+            .time = time,
+        };
+        try self.gates.append(gate);
+    }
+
+    pub fn swap(self: *QuantumCircuit, a: usize, b: usize) !void {
+        const qubits = try self.allocator.alloc(usize, 2);
+        qubits[0] = a;
+        qubits[1] = b;
+        const time = @max(self.times[a], self.times[b]) + 1;
+        self.times[a] = time;
+        self.times[b] = time;
+        const gate = Gate{
+            .matrix = &standard_matrices[4],
+            .qubits = qubits,
+            .time = time,
         };
         try self.gates.append(gate);
     }
@@ -101,11 +138,14 @@ pub const QuantumCircuit = struct {
         // order gates and add identities
         var matrices = std.ArrayList(*const Matrix).init(self.allocator);
         defer matrices.deinit();
-        for (0..self.times.len) |qubit| {
+        var qubit: usize = 0;
+        while (qubit < self.times.len) : (qubit += 1) {
             const matrix = blk: {
                 for (gates.items) |gate| {
-                    if (gate.qubits[0] == qubit)
+                    if (std.mem.indexOfScalar(usize, gate.qubits, qubit)) |_| {
+                        qubit += gate.qubits.len - 1;
                         break :blk gate.matrix;
+                    }
                 }
                 break :blk null;
             } orelse &standard_matrices[0];
@@ -122,8 +162,7 @@ pub const QuantumCircuit = struct {
         current.values = _current;
         current.copyFrom(matrices.items[0].*);
 
-        for (1..self.times.len) |index| {
-            const next = matrices.items[index];
+        for (matrices.items[1..]) |next| {
             const n_rows = current.n_rows * next.n_rows;
             const n_cols = current.n_cols * next.n_cols;
             const tensor_len = n_rows * n_cols;
@@ -142,7 +181,7 @@ pub const QuantumCircuit = struct {
     }
 };
 
-const standard_matrices: [3]Matrix = .{
+const standard_matrices: [5]Matrix = .{
     .{
         .values = @constCast(&U(0, 0, 0)),
         .n_rows = 2,
@@ -157,6 +196,50 @@ const standard_matrices: [3]Matrix = .{
         .values = @constCast(&U(std.math.pi * 0.5, 0, std.math.pi)),
         .n_rows = 2,
         .n_cols = 2,
+    },
+    .{
+        .values = @constCast(&[16]Complex{
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+        }),
+        .n_rows = 4,
+        .n_cols = 4,
+    },
+    .{
+        .values = @constCast(&[16]Complex{
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 0, .b = 0 },
+            .{ .a = 1, .b = 0 },
+        }),
+        .n_rows = 4,
+        .n_cols = 4,
     },
 };
 

@@ -184,11 +184,24 @@ pub fn Vector(comptime T: type) type {
             options: std.fmt.FormatOptions,
             writer: anytype,
         ) !void {
-            _ = fmt;
             _ = options;
 
-            for (value.values) |a| {
-                try writer.print("{any} ", .{a});
+            if (std.mem.eql(u8, fmt, "|>")) {
+                var first = true;
+                for (value.values, 0..) |a, index| {
+                    if (!std.math.approxEqAbs(f64, a.norm(), 0, 1e-9)) {
+                        if (first) {
+                            first = false;
+                            try writer.print("{}|{b}>", .{ a, index });
+                        } else {
+                            try writer.print(" + {}|{b}>", .{ a, index });
+                        }
+                    }
+                }
+            } else {
+                for (value.values) |a| {
+                    try writer.print("{any} ", .{a});
+                }
             }
             try writer.print("\n", .{});
         }
