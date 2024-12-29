@@ -187,14 +187,18 @@ pub fn Vector(comptime T: type) type {
             _ = options;
 
             if (std.mem.eql(u8, fmt, "|>")) {
+                var buffer: [64]u8 = undefined;
+                const size: usize = @intFromFloat(@log2(@as(f64, @floatFromInt(value.values.len))));
+
                 var first = true;
                 for (value.values, 0..) |a, index| {
                     if (!std.math.approxEqAbs(f64, a.norm(), 0, 1e-9)) {
+                        toBinary(index, buffer[0..size]);
                         if (first) {
                             first = false;
-                            try writer.print("{}|{b}>", .{ a, index });
+                            try writer.print("{}|{s}>", .{ a, buffer[0..size] });
                         } else {
-                            try writer.print(" + {}|{b}>", .{ a, index });
+                            try writer.print(" + {}|{s}>", .{ a, buffer[0..size] });
                         }
                     }
                 }
@@ -204,6 +208,16 @@ pub fn Vector(comptime T: type) type {
                 }
             }
             try writer.print("\n", .{});
+        }
+
+        fn toBinary(number: usize, buffer: []u8) void {
+            var shift: u32 = 1;
+            for (0..buffer.len) |index| {
+                const char: u8 = if (number & shift == 0) '0' else '1';
+                buffer[index] = char;
+                shift = shift << 1;
+            }
+            std.mem.reverse(u8, buffer);
         }
     };
 }
