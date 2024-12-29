@@ -112,12 +112,38 @@ pub fn Matrix(comptime T: type) type {
             if (self.n_rows != other.n_cols)
                 return error.LengthsDontMatch;
 
-            for (0..self.n_rows) |row| {
-                for (0..other.n_cols) |col| {
-                    const row_v = try self.rowAt(row, buffer.v1);
-                    const col_v = try other.colAt(col, buffer.v2);
-                    buffer.m.values[buffer.m.at(row, col)] = try row_v.inner(col_v);
-                }
+            const n = self.n_rows;
+            switch (@typeInfo(T)) {
+                .ComptimeInt, .Int, .ComptimeFloat, .Float => {
+                    for (0..n) |row| {
+                        for (0..n) |col| {
+                            var sum: T = 0;
+                            for (0..n) |k| {
+                                const a = self.values[self.at(row, k)];
+                                const b = self.values[self.at(k, col)];
+                                sum += a * b;
+                            }
+                            buffer.m.values[buffer.m.at(row, col)] = sum;
+                        }
+                    }
+                },
+                .Struct => {
+                    if (!std.meta.hasMethod(T, "multiply"))
+                        panic("no method multiply", .{});
+
+                    for (0..n) |row| {
+                        for (0..n) |col| {
+                            var sum: T = T.Zero;
+                            for (0..n) |k| {
+                                const a = self.values[self.at(row, k)];
+                                const b = self.values[self.at(k, col)];
+                                sum = sum.add(a.multiply(b));
+                            }
+                            buffer.m.values[buffer.m.at(row, col)] = sum;
+                        }
+                    }
+                },
+                else => unreachable,
             }
 
             return buffer.m;
