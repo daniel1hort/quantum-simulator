@@ -101,6 +101,12 @@ pub const QuantumCircuit = struct {
         try self.addGate(matrix, &qubits);
     }
 
+    pub fn z(self: *QuantumCircuit, qubit: usize) !void {
+        const qubits = [_]usize{qubit};
+        const matrix = &pauli_z;
+        try self.addGate(matrix, &qubits);
+    }
+
     pub fn h(self: *QuantumCircuit, qubit: usize) !void {
         const qubits = [_]usize{qubit};
         const matrix = &hadamard;
@@ -123,8 +129,16 @@ pub const QuantumCircuit = struct {
         const _qubits = try self.allocator.alloc(usize, qubits.len);
         @memcpy(_qubits, qubits);
 
-        if (qubits.len > 1)
+        if (_qubits.len > 1) {
             try self.addSwapGates(_qubits);
+        } else {
+            const pos = std.mem.indexOfScalar(
+                usize,
+                self.permutation,
+                _qubits[0],
+            ).?;
+            _qubits[0] = pos;
+        }
 
         const time = self.maxTime(_qubits) + 1;
         for (_qubits) |qubit| {
@@ -301,6 +315,11 @@ pub const pauli_x = Matrix{
     .n_rows = 2,
     .n_cols = 2,
 };
+pub const pauli_z = Matrix{
+    .values = @constCast(&P(std.math.pi)),
+    .n_rows = 2,
+    .n_cols = 2,
+};
 pub const hadamard = Matrix{
     .values = @constCast(&U(std.math.pi * 0.5, 0, std.math.pi)),
     .n_rows = 2,
@@ -389,5 +408,14 @@ pub fn U(theta: f64, phi: f64, lambda: f64) [4]Complex {
             .a = @cos(phi + lambda) * @cos(theta * 0.5),
             .b = @sin(phi + lambda) * @cos(theta * 0.5),
         },
+    };
+}
+
+pub fn P(alpha: f64) [4]Complex {
+    return .{
+        .{ .a = 1, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = 0, .b = 0 },
+        .{ .a = @cos(alpha), .b = @sin(alpha) },
     };
 }
