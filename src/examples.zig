@@ -3,8 +3,8 @@ const Allocator = std.mem.Allocator;
 const quantum = @import("quantum.zig");
 const QuantumCircuit = quantum.QuantumCircuit;
 const Gate = quantum.Gate;
-const Complex = @import("complex.zig").Complex;
-const Matrix = @import("matrix.zig").Matrix(Complex);
+const Complex = @import("complex.zig");
+const Matrix = @import("matrix.zig");
 
 var toffoli2: Matrix = undefined;
 var toffoli3: Matrix = undefined;
@@ -63,7 +63,7 @@ pub fn sat_solver(allocator: Allocator) !void {
     try sat_solver_diffuser(&circuit);
 
     try circuit.run();
-    std.debug.print("{|>}\n", .{circuit.q_reg});
+    std.debug.print("{%}\n", .{circuit.q_reg});
 }
 
 fn sat_solver_oracle(circuit: *QuantumCircuit) !void {

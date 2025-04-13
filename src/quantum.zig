@@ -1,8 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Complex = @import("complex.zig").Complex;
-const Matrix = @import("matrix.zig").Matrix(Complex);
-const Vector = @import("vector.zig").Vector(Complex);
+const Complex = @import("complex.zig");
+const Matrix = @import("matrix.zig");
+const Vector = @import("vector.zig");
 
 pub const Gate = struct {
     matrix: *const Matrix,
@@ -246,6 +246,9 @@ pub const QuantumCircuit = struct {
     }
 
     fn firstQubitPosition(self: QuantumCircuit, qubits: []usize) usize {
+        if (self.permutation.len == 1)
+            return 0;
+
         const head = qubits[0];
         const tail = qubits[1..];
         const head_pos = std.mem.indexOfScalar(

@@ -9,10 +9,11 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    try examples.init_controlled_gates(allocator);
-    defer examples.deinit_controlled_gates(allocator);
+    var c = try QuantumCircuit.init(allocator, 1);
+    defer c.deinit();
 
-    try examples.simple_grover(allocator);
-    try examples.sat_solver(allocator);
-    try examples.parallel_sat_solver(allocator);
+    try c.h(0);
+
+    try c.run();
+    std.debug.print("{%}", .{c.q_reg});
 }
